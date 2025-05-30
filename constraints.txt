@@ -1,0 +1,11 @@
+# Constraints file to resolve protobuf dependency conflicts
+# This file specifies compatible versions for conflicting packages
+
+# Use protobuf version that satisfies descript-audiotools requirements
+protobuf>=3.19.0,<3.20.0
+
+# Use compatible onnx version that works with older protobuf
+onnx>=1.12.0,<1.14.0
+
+# Ensure tensorboard uses compatible protobuf
+tensorboard>=2.10.0,<2.15.0 
