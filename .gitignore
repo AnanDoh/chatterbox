@@ -1,3 +1,6 @@
+# Exception for specific audio files that should be tracked
+!"The Golden Voice - Ted Williams-yt.savetube.me.mp3"
+
 .vscode
 
 # Pylance
