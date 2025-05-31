@@ -5,27 +5,204 @@ import os
 from chatterbox.tts import ChatterboxTTS
 
 # -----------------------------
-# 1) Helper: split into ~500-char chunks at sentence boundaries
+# 1) Enhanced text preprocessing for natural pauses
 # -----------------------------
-def chunk_text_at_sentences(text, max_chars=500):
-    sentences = re.findall(r'.+?[\.!?](?:\s|$)', text, flags=re.S)
+def enhance_text_for_natural_speech(text):
+    """
+    Enhance text with better punctuation for natural pauses and breathing.
+    """
+    # Add pauses after common sentence starters and transitions
+    transition_words = [
+        "However", "Therefore", "Meanwhile", "Furthermore", "Nevertheless", 
+        "Moreover", "Additionally", "Consequently", "Subsequently", "Finally",
+        "First", "Second", "Third", "Next", "Then", "Now", "So", "Well",
+        "You know", "I mean", "Actually", "Basically", "Honestly"
+    ]
+    
+    for word in transition_words:
+        # Add slight pause after transition words
+        text = re.sub(rf'\b{word}\b,?', f'{word},', text, flags=re.IGNORECASE)
+    
+    # Add pauses for natural breathing points
+    text = re.sub(r'(\w+)\s+(and|but|or|yet|so)\s+', r'\1, \2 ', text)
+    
+    # Enhance dialogue and quotations with pauses
+    text = re.sub(r'"([^"]+)"', r', "\1",', text)
+    
+    # Add pauses before and after parenthetical expressions
+    text = re.sub(r'\s*\(([^)]+)\)\s*', r', (\1), ', text)
+    
+    # Ensure proper pauses after sentence endings
+    text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)
+    
+    # Add breathing pauses in long sentences (every 15-20 words)
+    sentences = re.split(r'[.!?]+', text)
+    enhanced_sentences = []
+    
+    for sentence in sentences:
+        if len(sentence.strip()) == 0:
+            continue
+            
+        words = sentence.strip().split()
+        if len(words) > 15:
+            # Insert natural pauses in long sentences
+            chunks = []
+            current_chunk = []
+            
+            for i, word in enumerate(words):
+                current_chunk.append(word)
+                
+                # Add pause after clauses or at natural break points
+                if (len(current_chunk) >= 8 and 
+                    (word.endswith(',') or word in ['and', 'but', 'or', 'because', 'when', 'while', 'if', 'that', 'which'])):
+                    chunks.append(' '.join(current_chunk))
+                    current_chunk = []
+                elif len(current_chunk) >= 15:
+                    # Force a pause in very long segments
+                    chunks.append(' '.join(current_chunk) + ',')
+                    current_chunk = []
+            
+            if current_chunk:
+                chunks.append(' '.join(current_chunk))
+            
+            enhanced_sentences.append(' '.join(chunks))
+        else:
+            enhanced_sentences.append(sentence.strip())
+    
+    # Rejoin sentences
+    text = '. '.join(enhanced_sentences)
+    
+    # Clean up multiple commas and spaces
+    text = re.sub(r',\s*,', ',', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r',\s*\.', '.', text)
+    
+    return text.strip()
+
+def chunk_text_at_sentences(text, max_chars=400):
+    """
+    Enhanced chunking that respects natural speech boundaries and maintains context.
+    Reduced chunk size for better processing and more natural pauses between chunks.
+    """
+    # First enhance the text for natural speech
+    text = enhance_text_for_natural_speech(text)
+    
+    # Split into sentences with better regex
+    sentences = re.findall(r'.+?[\.!?]+(?:\s|$)', text, flags=re.S)
     chunks, current = [], ""
+    
     for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+            
+        # If adding this sentence would exceed max_chars
         if len(current) + len(sent) > max_chars:
             if current:
+                # Add current chunk and start new one
                 chunks.append(current.strip())
                 current = sent
             else:
-                chunks.append(sent.strip())
-                current = ""
+                # Single sentence is too long, split it carefully
+                words = sent.split()
+                temp_chunk = ""
+                for word in words:
+                    if len(temp_chunk) + len(word) + 1 > max_chars:
+                        if temp_chunk:
+                            chunks.append(temp_chunk.strip())
+                            temp_chunk = word
+                        else:
+                            # Single word is too long, just add it
+                            chunks.append(word)
+                            temp_chunk = ""
+                    else:
+                        temp_chunk += " " + word if temp_chunk else word
+                
+                if temp_chunk:
+                    current = temp_chunk
+                else:
+                    current = ""
         else:
-            current += sent
+            # Add sentence to current chunk
+            current += " " + sent if current else sent
+    
+    # Add final chunk
     if current:
         chunks.append(current.strip())
+    
     return chunks
 
 # -----------------------------
-# 2) Set up device (GPU if available)
+# 2) Natural voice parameter configurations
+# -----------------------------
+class VoicePresets:
+    """
+    Optimized voice presets based on Chatterbox TTS guide for natural speech.
+    """
+    
+    @staticmethod
+    def natural_narration():
+        """For calm, natural storytelling - optimized for your long narrative text."""
+        return {
+            'exaggeration': 0.4,      # Subdued, natural delivery
+            'cfg_weight': 0.35,       # Slower, more deliberate pace
+            'temperature': 0.6        # Consistent but not robotic
+        }
+    
+    @staticmethod
+    def conversational():
+        """For dialogue and more expressive parts."""
+        return {
+            'exaggeration': 0.5,      # Neutral, natural speech
+            'cfg_weight': 0.4,        # Moderate pace
+            'temperature': 0.7        # Slight variation for naturalness
+        }
+    
+    @staticmethod
+    def emotional_moments():
+        """For emotionally charged sections."""
+        return {
+            'exaggeration': 0.6,      # More expressive
+            'cfg_weight': 0.3,        # Slower for emotional impact
+            'temperature': 0.65       # Controlled variation
+        }
+    
+    @staticmethod
+    def reflective():
+        """For introspective, thoughtful passages."""
+        return {
+            'exaggeration': 0.35,     # Very calm
+            'cfg_weight': 0.25,       # Very slow, contemplative
+            'temperature': 0.55       # Consistent delivery
+        }
+
+def detect_text_mood(text):
+    """
+    Analyze text to determine appropriate voice preset.
+    """
+    text_lower = text.lower()
+    
+    # Emotional indicators
+    emotional_words = ['cried', 'tears', 'sobbing', 'angry', 'furious', 'excited', 'thrilled', 'shocked', 'devastated']
+    dialogue_indicators = ['"', "'", 'said', 'asked', 'replied', 'whispered', 'shouted']
+    reflective_words = ['remember', 'thought', 'wondered', 'realized', 'understood', 'reflected', 'considered']
+    
+    emotional_count = sum(1 for word in emotional_words if word in text_lower)
+    dialogue_count = sum(1 for indicator in dialogue_indicators if indicator in text)
+    reflective_count = sum(1 for word in reflective_words if word in text_lower)
+    
+    # Determine mood based on content
+    if emotional_count >= 2:
+        return VoicePresets.emotional_moments()
+    elif dialogue_count >= 3:
+        return VoicePresets.conversational()
+    elif reflective_count >= 2:
+        return VoicePresets.reflective()
+    else:
+        return VoicePresets.natural_narration()
+
+# -----------------------------
+# 3) Set up device (GPU if available)
 # -----------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -45,14 +222,14 @@ def patched_torch_load(*args, **kwargs):
 torch.load = patched_torch_load
 
 # -----------------------------
-# 3) Load model onto GPU
+# 4) Load model onto GPU
 # -----------------------------
 print("Loading ChatterboxTTS model...")
 model = ChatterboxTTS.from_pretrained(device=device)
 print("Model loaded successfully!")
 
 # -----------------------------
-# 4) Load text from script.txt if it exists, otherwise use default
+# 5) Load text from script.txt if it exists, otherwise use default
 # -----------------------------
 script_file = "script.txt"
 # Define the audio sample file for voice cloning
@@ -127,46 +304,112 @@ else:
     print("Will use this audio for voice cloning.")
 
 # -----------------------------
-# 5) Chunk, synthesize on GPU, save each part
+# 6) Enhanced chunking and synthesis with adaptive voice parameters
 # -----------------------------
-chunks = chunk_text_at_sentences(text, max_chars=500)
+chunks = chunk_text_at_sentences(text, max_chars=400)  # Smaller chunks for better control
 wavs_cpu = []
 chunk_files = []
 
-print(f"\nProcessing {len(chunks)} chunks...")
+print(f"\nProcessing {len(chunks)} chunks with adaptive voice parameters...")
+print("Voice parameters will be automatically adjusted based on content mood.")
+
+# Set a consistent seed for reproducible results (optional)
+torch.manual_seed(42)
 
 for idx, chunk in enumerate(chunks, start=1):
-    print(f"Processing chunk {idx}/{len(chunks)}...")
-    # generate returns a GPU tensor [1, T] - now with voice cloning if audio sample is available
-    if audio_sample_file:
-        wav_gpu = model.generate(chunk, audio_prompt_path=audio_sample_file)
-    else:
-        wav_gpu = model.generate(chunk)
-    # move to CPU for saving
-    wav = wav_gpu.detach().cpu()
-    filename = f"chunk_{idx}.wav"
-    chunk_files.append(filename)
-    ta.save(filename, wav, model.sr)
-    print(f"Saved {filename} ({len(chunk)} chars)")
-    wavs_cpu.append(wav)
-
-# -----------------------------
-# 6) Stitch them into one file
-# -----------------------------
-print("\nStitching chunks together...")
-full_wav = torch.cat(wavs_cpu, dim=1)
-ta.save("full_output.wav", full_wav, model.sr)
-print("Saved full_output.wav")
-
-# -----------------------------
-# 7) Clean up chunk files
-# -----------------------------
-print("\nCleaning up chunk files...")
-for chunk_file in chunk_files:
+    print(f"\nProcessing chunk {idx}/{len(chunks)}...")
+    print(f"Text preview: {chunk[:100]}{'...' if len(chunk) > 100 else ''}")
+    
+    # Detect mood and get appropriate voice parameters
+    voice_params = detect_text_mood(chunk)
+    print(f"Detected mood - Exaggeration: {voice_params['exaggeration']}, "
+          f"CFG Weight: {voice_params['cfg_weight']}, "
+          f"Temperature: {voice_params['temperature']}")
+    
+    # Generate with optimized parameters for natural speech
     try:
-        os.remove(chunk_file)
-        print(f"Deleted {chunk_file}")
-    except OSError as e:
-        print(f"Error deleting {chunk_file}: {e}")
+        if audio_sample_file:
+            wav_gpu = model.generate(
+                chunk, 
+                audio_prompt_path=audio_sample_file,
+                exaggeration=voice_params['exaggeration'],
+                cfg_weight=voice_params['cfg_weight'],
+                temperature=voice_params['temperature']
+            )
+        else:
+            wav_gpu = model.generate(
+                chunk,
+                exaggeration=voice_params['exaggeration'],
+                cfg_weight=voice_params['cfg_weight'],
+                temperature=voice_params['temperature']
+            )
+        
+        # Move to CPU for saving
+        wav = wav_gpu.detach().cpu()
+        filename = f"chunk_{idx:03d}.wav"
+        chunk_files.append(filename)
+        ta.save(filename, wav, model.sr)
+        print(f"✓ Saved {filename} ({len(chunk)} chars)")
+        wavs_cpu.append(wav)
+        
+    except Exception as e:
+        print(f"✗ Error processing chunk {idx}: {e}")
+        continue
 
-print("\nProcessing complete!")
+# -----------------------------
+# 7) Stitch chunks with natural pauses between them
+# -----------------------------
+print("\nStitching chunks together with natural inter-chunk pauses...")
+
+if wavs_cpu:
+    # Add small silence between chunks for natural flow (0.3 seconds)
+    silence_duration = int(0.3 * model.sr)  # 0.3 seconds of silence
+    silence = torch.zeros(1, silence_duration)
+    
+    # Combine all chunks with pauses
+    final_parts = []
+    for i, wav in enumerate(wavs_cpu):
+        final_parts.append(wav)
+        # Add pause between chunks (except after the last one)
+        if i < len(wavs_cpu) - 1:
+            final_parts.append(silence)
+    
+    full_wav = torch.cat(final_parts, dim=1)
+    ta.save("full_output_natural.wav", full_wav, model.sr)
+    print("✓ Saved full_output_natural.wav with enhanced natural speech")
+    
+    # Also save without pauses for comparison
+    full_wav_no_pauses = torch.cat(wavs_cpu, dim=1)
+    ta.save("full_output_no_pauses.wav", full_wav_no_pauses, model.sr)
+    print("✓ Saved full_output_no_pauses.wav for comparison")
+else:
+    print("✗ No audio chunks were successfully generated!")
+
+# -----------------------------
+# 8) Clean up chunk files (optional)
+# -----------------------------
+cleanup_chunks = input("\nDelete individual chunk files? (y/N): ").lower().strip()
+if cleanup_chunks == 'y':
+    print("Cleaning up chunk files...")
+    for chunk_file in chunk_files:
+        try:
+            os.remove(chunk_file)
+            print(f"✓ Deleted {chunk_file}")
+        except OSError as e:
+            print(f"✗ Error deleting {chunk_file}: {e}")
+else:
+    print("Keeping individual chunk files for review.")
+
+print("\n🎉 Processing complete!")
+print("\nGenerated files:")
+print("- full_output_natural.wav (with enhanced natural speech and pauses)")
+print("- full_output_no_pauses.wav (for comparison)")
+if not cleanup_chunks == 'y':
+    print(f"- {len(chunk_files)} individual chunk files (chunk_001.wav, etc.)")
+
+print("\n📝 Voice Enhancement Features Applied:")
+print("✓ Adaptive voice parameters based on text mood")
+print("✓ Enhanced text preprocessing for natural pauses")
+print("✓ Optimized chunking for better speech flow")
+print("✓ Natural inter-chunk pauses")
+print("✓ Mood-based parameter adjustment (narration/emotional/reflective)")
