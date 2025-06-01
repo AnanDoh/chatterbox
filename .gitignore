@@ -49,7 +49,13 @@ checkpoints/
 
 *.wav
 /venv/Scripts
-=======
+
+# Flux virtual environment and generated files
+flux_venv/
+flux_test_output.png
+generated_image.png
+temp_flux.py
+temp_chatterbox.py
 
 # Ignore generated sample .wav files
 **/*.wav
