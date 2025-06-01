@@ -59,3 +59,4 @@ temp_chatterbox.py
 
 # Ignore generated sample .wav files
 **/*.wav
+*.gguf
